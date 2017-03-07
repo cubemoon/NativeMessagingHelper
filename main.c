@@ -58,11 +58,16 @@ int main(int argc, char** argv) {
         //    INFINITE); // consider timeout?
         
         //check stdin
-        DWORD events_read;
+        DWORD available;
         INPUT_RECORD r;
-        if (!PeekConsoleInput(in, &r, 1, &events_read)) panic();
         
-        if (events_read > 0) {
+        if (!PeekConsoleInput(in, &r, 1, &available)) {
+            if (!PeekNamedPipe(in, NULL, 0, NULL, &available, NULL)) {
+                panic(); //exit gracefully
+            }
+        }
+        
+        if (available > 0) {
             uint32_t message_length;
             
             if (!ReadFile(in, &message_length, sizeof(message_length), NULL, NULL)) {
@@ -133,25 +138,24 @@ int main(int argc, char** argv) {
         }*/
         
         //try to read from the child process (if connected)
-        DWORD bytes_available;
         
-        if(!PeekNamedPipe(child_out_read, NULL, 0, NULL, &bytes_available, NULL)) {
+        if(!PeekNamedPipe(child_out_read, NULL, 0, NULL, &available, NULL)) {
             panic();
         }
         
-        if (bytes_available > available_stack()/8) {
-            bytes_available = available_stack()/8;
+        if (available > available_stack()/8) {
+            available = available_stack()/8;
         }
         
-        if (bytes_available > 0) {
-            char buffer[bytes_available+1];
+        if (available > 0) {
+            char buffer[available+1];
             DWORD bytes_read;
             ReadFile(child_out_read, 
                     buffer, 
-                    bytes_available, 
+                    available, 
                     &bytes_read, 
                     NULL);
-            buffer[bytes_available] = '\0';
+            buffer[bytes_read] = '\0';
             char* message = json_encode_string(buffer);
             uint32_t message_len = strlen(message);
             if (!WriteFile(out, &message_len, sizeof(message_len), NULL, NULL)) {
