@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     startup_info.hStdOutput = child_out_write;
     startup_info.hStdInput = child_in_read;
     
-    //HANDLE wait_handles[] = {in, child_out_read}; //todo: wait for process termination
+    //HANDLE wait_handles[] = {in, child_out_read};
     
     
     while (true) {
@@ -56,6 +56,8 @@ int main(int argc, char** argv) {
         //    wait_handles,
         //    FALSE, //wait for any
         //    INFINITE); // consider timeout?
+        
+        Sleep(10); //todo: switch to overlapped io and waitformultipleobjects
         
         //check stdin
         DWORD available;
@@ -109,22 +111,33 @@ int main(int argc, char** argv) {
                     JsonNode* command = json_find_member(message, "command");
                     JsonNode* args = json_find_member(message, "args");
                     
-                    if (command == NULL ||
-                        command->tag != JSON_STRING || 
-                        (args && args->tag != JSON_STRING) ||
-                        !CreateProcess(command->string_, 
-                                     args ? args->string_ : NULL, // command line 
-                                     NULL,          // process security attributes 
-                                     NULL,          // primary thread security attributes 
-                                     TRUE,          // handles are inherited 
-                                     0,             // creation flags 
-                                     NULL,          // use parent's environment 
-                                     NULL,          // use parent's current directory 
-                                     &startup_info, // STARTUPINFO pointer 
-                                     &process_info)) // receives PROCESS_INFORMATION 
+                    if (command 
+                        && command->tag == JSON_STRING 
+                        && (!args || args->tag == JSON_STRING))
                     {
-                        //fail gracefully?
-                        panic();
+                        if (!CreateProcess(
+                                 command->string_, 
+                                 args ? args->string_ : NULL, // command line 
+                                 NULL,          // process security attributes 
+                                 NULL,          // primary thread security attributes 
+                                 TRUE,          // handles are inherited 
+                                 0,             // creation flags 
+                                 NULL,          // use parent's environment 
+                                 NULL,          // use parent's current directory 
+                                 &startup_info, // STARTUPINFO pointer 
+                                 &process_info)) // receives PROCESS_INFORMATION 
+                        {
+                            //fail gracefully?
+                            panic();
+                        }
+                    }
+                } else if (strcmp(operation->string_, "kill") == 0) {
+                    if (process_info.hProcess) {
+                        if (!TerminateProcess(process_info.hProcess, 1)) { //todo: send ctrl-c/wm_quit unless force
+                            //fail gracefully?
+                        }
+                    } else {
+                        //nothing running
                     }
                 }
             } else {
@@ -167,6 +180,39 @@ int main(int argc, char** argv) {
             free(message);
         }
         
-        Sleep(10);
+        if (process_info.hProcess) {
+            //GetExitCodeProcess complains INVALID_HANDLE, but GetExitCodeThread works
+            DWORD exit_code;
+            if (!GetExitCodeThread(process_info.hThread, &exit_code)) {
+                exit_code = 0; // :/
+            }
+            
+            if (exit_code != STILL_ACTIVE 
+                    //or process exited with status 259 (STILL_ACTIVE!?!?)
+                    || !WaitForSingleObject(process_info.hProcess, 0)) {
+                //clean up
+                CloseHandle(process_info.hThread);
+                CloseHandle(process_info.hProcess);
+                ZeroMemory(&process_info, sizeof(process_info));
+                
+                //inform the others
+                JsonNode* o = json_mkobject();
+                JsonNode* type = json_mkstring("exit");
+                JsonNode* status = json_mknumber(exit_code);
+                json_append_member(o, "type", type);
+                json_append_member(o, "status", status);
+                char* message = json_encode(o);
+                uint32_t message_len = strlen(message);
+                if (!WriteFile(out, &message_len, sizeof(message_len), NULL, NULL)) {
+                    panic(); //todo:quit gracefully when chrome closes pipe
+                }
+                if (!WriteFile(out, message, strlen(message), NULL, NULL)) {
+                    panic();
+                }
+                
+                json_delete(o);
+                free(message);
+            }
+        }
     }
 }
