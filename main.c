@@ -47,8 +47,6 @@ int main(int argc, char** argv) {
   startup_info.hStdOutput = child_out_write;
   startup_info.hStdInput = child_in_read;
 
-  // HANDLE wait_handles[] = {in, child_out_read};
-
   while (true) {
     // DWORD waker = WaitForMultipleObjects(
     //    sizeof(wait_handles)/sizeof(wait_handles[0]),
@@ -127,10 +125,9 @@ int main(int argc, char** argv) {
           }
         } else if (strcmp(operation->string_, "kill") == 0) {
           if (process_info.hProcess) {
-            if (!TerminateProcess(
-                    process_info.hProcess,
-                    1)) {  // todo: send ctrl-c/wm_quit unless force
-              // fail gracefully?
+            // todo: send ctrl-c/wm_quit unless force
+            if (!TerminateProcess(process_info.hProcess, 1)) {
+              // fail gracefully? (e.g. process changed uid
             }
           } else {
             // nothing running
@@ -174,7 +171,7 @@ int main(int argc, char** argv) {
 
     if (process_info.hProcess) {
       // GetExitCodeProcess complains INVALID_HANDLE, but GetExitCodeThread
-      // works
+      // works unless the program is multithreaded (FIXME)
       DWORD exit_code;
       if (!GetExitCodeThread(process_info.hThread, &exit_code)) {
         exit_code = 0;  // :/
